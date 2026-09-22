@@ -776,15 +776,4 @@ without any well-formedness hypothesis.
   some choreography $C'$, to which the equivalences apply.
 \end{proof}
 
-\begin{remark}[What is not claimed]
-  Choreographies in this language are not deterministic: different processes
-  may interleave their actions in different orders, and \rn{C|Delay} makes the
-  choreographic semantics reflect this.  The correctness results relate the
-  two transition systems step by step, but they do not, and should not,
-  assert that a choreography has a unique execution.  What the design
-  guarantees is that the branching structure of a conditional is resolved
-  identically at every participant, which is precisely what selections and
-  merging achieve in CC by other means.
-\end{remark}
-
 \end{document}

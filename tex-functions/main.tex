@@ -1,0 +1,1219 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=1.05in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{stmaryrd}
+\usepackage{mathpartir}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!55!black,citecolor=blue!55!black,urlcolor=blue!55!black]{hyperref}
+
+%%% Theorem environments
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{proposition}[theorem]{Proposition}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+%%% Keywords and syntax
+\newcommand{\kw}[1]{\mathsf{#1}}
+\newcommand{\kif}{\kw{if}\;}
+\newcommand{\kthen}{\;\kw{then}\;}
+\newcommand{\kelse}{\;\kw{else}\;}
+\newcommand{\nil}{\mathbf{0}}
+\newcommand{\ttrue}{\mathsf{tt}}
+\newcommand{\ffalse}{\mathsf{ff}}
+\newcommand{\seq}{;\;}
+\newcommand{\pp}{\mathsf{p}}
+\newcommand{\qq}{\mathsf{q}}
+\newcommand{\rr}{\mathsf{r}}
+\newcommand{\Procs}{\mathcal{P}}
+\newcommand{\Var}{\mathit{Var}}
+\newcommand{\Val}{\mathit{Val}}
+\newcommand{\pn}{\mathrm{pn}}
+\newcommand{\eval}[3]{#1 \downarrow_{#2} #3}
+\newcommand{\conf}[2]{\langle #1,\, #2\rangle}
+\newcommand{\lto}[1]{\xrightarrow{\;#1\;}}
+\newcommand{\proj}[2]{\llbracket #1 \rrbracket_{#2}}
+\newcommand{\projn}[1]{\llbracket #1 \rrbracket}
+\newcommand{\tauat}[1]{\tau\mathord{@}#1}
+\newcommand{\cast}[2]{#1 \rightsquigarrow #2}
+\newcommand{\upd}[3]{#1[#2 \mapsto #3]}
+\newcommand{\rn}[1]{{\normalfont\scshape #1}}
+\newcommand{\restr}[2]{#1|_{#2}}
+\newcommand{\ifcond}[3]{\kif #1 \kthen #2 \kelse #3}
+\newcommand{\sendbr}[4]{#1!#2 \mathbin{\triangleright} (#3,\, #4)}
+\newcommand{\recvbr}[3]{#1?(#2,\, #3)}
+\newcommand{\pif}[3]{\kif #1 \kthen #2 \kelse #3}
+\newcommand{\case}[1]{\medskip\noindent\textbf{Case #1.}\;}
+\newcommand{\subcase}[1]{\smallskip\noindent\textit{Subcase #1.}\;}
+\newcommand{\Bis}{\mathcal{B}}
+
+%%% Procedures
+\newcommand{\Pnames}{\mathcal{X}}
+\newcommand{\Defs}{\mathcal{C}}
+\newcommand{\NDefs}{\mathcal{D}}
+\newcommand{\body}[1]{\Defs(#1)}
+\newcommand{\ldef}[2]{\NDefs_{#1}(#2)}
+\newcommand{\rt}[3]{#1\mathbin{:}#2.\,#3}
+\newcommand{\Loop}{\mathit{Loop}}
+\newcommand{\Cif}{C_{\mathrm{if}}}
+\newcommand{\CL}{C_{\Loop}}
+
+\title{A Core Choreographic Language with\\Multicast Knowledge of Choice and Recursion}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+  We present a small choreographic programming language in the style of Core
+  Choreographies, with local computation, point-to-point communication,
+  conditionals and recursive procedures.  The language departs from Core
+  Choreographies in how it propagates knowledge of choice.  Instead of
+  selections and merging, a conditional guarded by process $\pp$ is
+  implemented by having $\pp$ \emph{multicast the value of its guard} to every
+  other process that participates in the conditional, including processes
+  that participate only through procedures called from its branches, with
+  every participant, including $\pp$, selecting its branch in the same step.
+  At the network level this is realised by two symmetric atomic constructs,
+  \emph{send-and-branch} for the guarding process and
+  \emph{receive-and-branch} for the receivers.  Procedure calls, in contrast,
+  are entered by each participant independently, and the choreographic
+  semantics records a partially entered call with a runtime term.  We give the
+  syntax and semantics of choreographies and of network processes, define
+  endpoint projection, and prove that projection is correct in both
+  directions.  Projection is total (no merging can fail), conditionals need no
+  runtime terms, and the correctness theorem is an exact labelled
+  bisimulation with no pruning relation.  Its only hypothesis is a
+  well-formedness condition on runtime terms, which holds for every program and
+  is preserved by execution.
+\end{abstract}
+
+\section*{Overview}
+
+Core Choreographies (CC) implements \emph{knowledge of choice} by
+\emph{selections}: after a conditional $\ifcond{\pp.e}{C_1}{C_2}$, the process
+$\pp$ must inform every other participant of the branch it took with a label
+communication of the form $\pp \to \qq[l]$.  Endpoint projection then uses a
+partial \emph{merging} operator to combine the two branches of a process that
+has not yet learned the choice, and \emph{projectability} becomes a side
+condition that may fail.  Moreover, since the projections of the two branches
+have been merged, the correspondence between a choreography and its projection
+must be stated up to a \emph{pruning} relation that discards the unreachable
+alternatives once a choice is known.
+
+This note works out an alternative.  A conditional is realised by a single
+synchronous multicast: $\pp$ evaluates its guard to a boolean $v$, sends $v$
+to the set $Q$ of all other processes occurring in either branch, and
+\emph{in the same step} every participant, $\pp$ included, continues with the
+branch selected by $v$.  Processes that occur in neither branch are not
+involved at all.  Because every participant learns the choice before executing
+any part of a branch, there is nothing to merge and no dead code to prune.
+
+The network-level constructs that implement this are deliberately symmetric.
+The guarding process executes a \emph{send-and-branch}
+$\sendbr{Q}{e}{B_1}{B_2}$, which evaluates $e$, multicasts the result to $Q$
+and continues as $B_1$ or $B_2$ according to that result; each receiver
+executes a \emph{receive-and-branch} $\recvbr{\pp}{B_1}{B_2}$, which waits for
+a boolean from $\pp$ and continues accordingly.  Since the sender's own
+branching is part of the multicast step rather than a separate local action,
+there is no intermediate network state in which the announcement has been
+made but the sender has not yet committed.  The choreographic semantics
+therefore needs no runtime term for a partially executed conditional.
+
+The language includes recursive procedures in the style of CC: a single
+global set of definitions $X = C$, with calls in tail position.  Two
+aspects of the extension deserve comment.  First, the receivers of a
+conditional are now all processes that may take part in either branch,
+\emph{including through procedures called from it}.  This set is computed
+statically, as a least fixed point over the procedure definitions, and the
+multicast mechanism is otherwise unchanged.  Second, a procedure call is not
+atomic at the network level: each process unfolds its own local version of
+the procedure, independently of the others.  We make every such unfolding a
+visible step, both in networks and in choreographies, and record a call that
+has been entered by some but not all of its participants with a runtime term
+$\rt{P}{X}{C}$, in which $P$ is the set of processes still to enter and $C$
+is the current state of the body.  This is the only runtime term in the
+language.  The price is a well-formedness invariant on runtime terms, which
+holds trivially for programs and is preserved by execution; under it, the
+correspondence between choreographies and networks is a step-for-step
+labelled bisimulation, with no pruning and no unfolding up to a structural
+congruence.
+
+The remainder is organised as follows: \S\ref{sec:chor} gives the syntax and
+semantics of choreographies, \S\ref{sec:net} the syntax and semantics of
+network processes, \S\ref{sec:epp} endpoint projection, and
+\S\ref{sec:correct} the proof of correctness in both directions.
+
+\section{Choreographies}
+\label{sec:chor}
+
+\subsection{Preliminaries}
+
+We fix a finite set $\Procs$ of \emph{process names}, ranged over by
+$\pp,\qq,\rr$; sets of process names are ranged over by $P$ and $Q$.  We fix a
+finite set $\Pnames$ of \emph{procedure names}, ranged over by $X,Y$.  We also
+fix a set $\Var$ of \emph{variables}, ranged over by $x,y,z$, and a set $\Val$
+of \emph{values}, ranged over by $v,w$, containing the booleans $\ttrue$ and
+$\ffalse$.
+
+Local \emph{expressions} $e$ are a parameter of the language.  A \emph{local
+store} is a total function $s : \Var \to \Val$.  We write
+$\eval{e}{s}{v}$ when $e$ evaluates to $v$ in store $s$.
+
+\begin{assumption}\label{ass:eval}
+  Evaluation is total and deterministic: for every $e$ and $s$ there is exactly
+  one $v$ with $\eval{e}{s}{v}$.  Furthermore, every expression used as the
+  guard of a conditional evaluates to a boolean in every store.
+\end{assumption}
+
+\noindent
+The second half of the assumption is a typing concern that is orthogonal to the
+present development; any standard local type system enforces it.  A (global)
+\emph{store} is a function $\sigma : \Procs \to (\Var \to \Val)$; we write
+$\sigma_\pp$ for $\sigma(\pp)$ and $\upd{\sigma}{\pp.x}{v}$ for the store that
+agrees with $\sigma$ except that $\upd{\sigma}{\pp.x}{v}_\pp(x) = v$.
+
+\subsection{Syntax}
+
+\begin{definition}[Choreographies]\label{def:chor-syntax}
+  Actions $\eta$ and choreographies $C$ are given by the grammar
+  \[
+  \begin{array}{r@{\;\;}c@{\;\;}l@{\qquad}l}
+    \eta & ::= & \pp.x := e & \text{(local computation)}\\
+         & \mid & \pp.e \to \qq.x & \text{(communication, $\pp \neq \qq$)}\\[1ex]
+    C & ::= & \nil & \text{(terminated)}\\
+      & \mid & \eta \seq C & \text{(action)}\\
+      & \mid & \ifcond{\pp.e}{C_1}{C_2} & \text{(conditional)}\\
+      & \mid & X & \text{(procedure call)}\\
+      & \mid & \rt{P}{X}{C} & \text{(runtime term, $\emptyset \neq P \subseteq \Procs$)}
+  \end{array}
+  \]
+  For a conditional with branches $C_1, C_2$ we write $C_\ttrue = C_1$ and
+  $C_\ffalse = C_2$, so that $C_v$ is the branch selected by the boolean $v$.
+  A choreography is a \emph{source choreography} if it contains no runtime
+  term.
+\end{definition}
+
+\begin{definition}[Procedure definitions]\label{def:defs}
+  A set of \emph{procedure definitions} $\Defs$ assigns to every procedure
+  name $X\in\Pnames$ a source choreography $\body{X}$, the \emph{body} of $X$.
+  We write $X = C$ when $\body{X} = C$.  Throughout, we fix one set of
+  procedure definitions $\Defs$.
+\end{definition}
+
+The action $\pp.x := e$ has $\pp$ evaluate $e$ and store the result in its
+local variable $x$.  The action $\pp.e \to \qq.x$ has $\pp$ evaluate $e$ and
+send the result to $\qq$, which stores it in $x$.  In
+$\ifcond{\pp.e}{C_1}{C_2}$ the process $\pp$ evaluates its guard $e$ and the
+choreography continues as $C_1$ or $C_2$ accordingly.  A call $X$ continues
+as the body $\body{X}$.  Bodies may call any procedure, including the one
+being defined, so procedures may be recursive and mutually recursive.  As in
+CC, conditionals and calls occur only in tail position: there is no
+sequential composition after either, and a continuation shared by both
+branches of a conditional is written in each of them.  In particular, a loop
+is a procedure whose body calls the procedure again in some branches and
+continues with whatever follows the loop in the others.  Unlike CC, there are
+no selections: knowledge of choice is built into the semantics of the
+conditional itself.
+
+The runtime term $\rt{P}{X}{C}$ is not written by programmers.  It arises
+during execution and records a call to $X$ that some, but not all, of its
+participants have entered: the body of $X$ has progressed to $C$, and the
+processes in $P$ have yet to enter the call.  Its role is explained together
+with the semantics in \S\ref{sec:chor-sem}.  So that the rules can be stated
+uniformly, we adopt the following convention: when $P = \emptyset$, the
+notation $\rt{P}{X}{C}$ stands for $C$ itself.  Once every participant has
+entered a call, there is nothing left to record.
+
+Procedures here take no parameters, as in CC.  Procedures parameterised on
+process names, as in Montesi's textbook presentation, would additionally need
+substitution of process names in choreographies and behaviours, and
+projection of procedure bodies onto parameter positions; we do not treat them.
+
+The process names occurring in a choreography now depend on the procedures it
+calls, and since procedures may be recursive these are given by a fixed point.
+
+\begin{definition}[Process names]\label{def:pn}
+  For a function $\rho : \Pnames \to 2^{\Procs}$, the set $\pn_\rho(\cdot)$ of
+  process names occurring in an action or choreography is defined by
+  \[
+  \begin{array}{l@{\quad}l}
+    \pn(\pp.x := e) = \{\pp\} &
+    \pn(\pp.e \to \qq.x) = \{\pp,\qq\}\\[0.5ex]
+    \pn_\rho(\nil) = \emptyset &
+    \pn_\rho(\eta \seq C) = \pn(\eta) \cup \pn_\rho(C)\\[0.5ex]
+    \pn_\rho(X) = \rho(X) &
+    \pn_\rho(\rt{P}{X}{C}) = P \cup \pn_\rho(C)\\[0.5ex]
+    \multicolumn{2}{l}{
+    \pn_\rho(\ifcond{\pp.e}{C_1}{C_2}) = \{\pp\}\cup\pn_\rho(C_1)\cup\pn_\rho(C_2).}
+  \end{array}
+  \]
+  Let $\pi : \Pnames \to 2^{\Procs}$ be the least function, ordered pointwise
+  by inclusion, such that $\pi(X) = \pn_\pi(\body{X})$ for every
+  $X\in\Pnames$.  We write $\pn(C)$ for $\pn_\pi(C)$; in particular
+  $\pn(X) = \pi(X)$, the set of \emph{participants} of $X$.  The
+  \emph{receivers} of a conditional at $\pp$ with branches $C_1,C_2$ are the
+  processes $(\pn(C_1)\cup\pn(C_2)) \setminus \{\pp\}$.
+\end{definition}
+
+The function $\pi$ exists because $\pn_\rho(C)$ is monotone in $\rho$, so
+the map $\rho \mapsto (X \mapsto \pn_\rho(\body{X}))$ is monotone on the
+finite lattice of functions $\Pnames\to 2^{\Procs}$.  It is computed by
+iterating this map from the function that is everywhere $\emptyset$, which
+stabilises after finitely many steps.  Concretely, $\pn(X)$ is the set of
+processes that occur in an action, or as the guard of a conditional, in the
+body of $X$ or of some procedure reachable from $X$ through calls.
+
+\begin{lemma}[Participants of a procedure]\label{lem:pn-body}
+  $\pn(\body{X}) = \pn(X)$ for every $X\in\Pnames$.
+\end{lemma}
+\begin{proof}
+  $\pn(\body{X}) = \pn_\pi(\body{X}) = \pi(X) = \pn(X)$, since $\pi$ is a
+  fixed point.
+\end{proof}
+
+The proofs below use only this fixed-point property; taking the \emph{least}
+fixed point keeps the sets of receivers, and hence the number of messages, as
+small as possible.  Note that the receivers of a conditional are all
+processes other than $\pp$ that occur in \emph{either} branch, even if they
+occur in only one of them, or only in a procedure called from one of them.
+The receiver set may be empty.
+
+\begin{example}\label{ex:chor}
+  Let $\Procs = \{\pp,\qq,\rr\}$ and $\Pnames = \{\Loop\}$ with
+  \[
+  \begin{array}{l@{\;}l}
+    \Loop \;=\; \pp.x := 2\cdot x \seq
+    & \kif \pp.(x > 10) \kthen
+       \big(\rr.n := n+1 \seq \pp.x \to \qq.y \seq \qq.y \to \rr.z \seq \nil\big)\\
+    & \kw{else}\; \big(\qq.k := k+1 \seq \Loop\big).
+  \end{array}
+  \]
+  Process $\pp$ doubles $x$ until it exceeds $10$, while $\qq$ counts the
+  number of rounds that did not end the loop.  When the loop ends, $\rr$
+  increments a counter and $\pp$'s value is forwarded to $\rr$ via $\qq$.  We
+  take the call $\Loop$ as the program.  Starting from the everywhere-empty
+  function, one iteration gives $\{\pp,\qq,\rr\}$ for $\Loop$ and a second
+  iteration gives the same set, so $\pn(\Loop) = \{\pp,\qq,\rr\}$.  The
+  receivers of the conditional are $\{\qq,\rr\}$; note that $\rr$ occurs only
+  in the first branch and in the call in the second.  We abbreviate
+  \[
+    \CL = \body{\Loop} = \pp.x := 2\cdot x \seq \Cif,
+    \qquad
+    \Cif = \ifcond{\pp.(x>10)}{C_1}{C_2},
+  \]
+  with $C_1 = \rr.n := n+1 \seq \pp.x \to \qq.y \seq \qq.y \to \rr.z \seq \nil$
+  and $C_2 = \qq.k := k+1 \seq \Loop$.
+\end{example}
+
+\subsection{Semantics}
+\label{sec:chor-sem}
+
+The semantics is a labelled transition system over \emph{configurations}
+$\conf{C}{\sigma}$.  Transition labels record which processes take part in a
+step and what kind of step it is.
+
+\begin{definition}[Labels]\label{def:labels}
+  Labels $\mu$ are given by
+  \[
+    \mu ::= \tauat{\pp} \;\mid\; \pp \to \qq \;\mid\; \cast{\pp}{Q}
+  \]
+  denoting, respectively, an internal step at $\pp$, a communication from
+  $\pp$ to $\qq$, and a multicast from $\pp$ to the set $Q$ (with $\pp\notin Q$).
+  The processes involved in a label are
+  $\pn(\tauat{\pp}) = \{\pp\}$, $\pn(\pp\to\qq) = \{\pp,\qq\}$ and
+  $\pn(\cast{\pp}{Q}) = \{\pp\}\cup Q$.
+\end{definition}
+
+\begin{definition}[Choreographic semantics]\label{def:chor-sem}
+  The relation $\conf{C}{\sigma} \lto{\mu} \conf{C'}{\sigma'}$ is the least
+  relation closed under the rules in Figure~\ref{fig:chor-sem}.
+\end{definition}
+
+\begin{figure}[t]
+\begin{mathpar}
+\inferrule*[lab=\rn{C|Local}]
+  {\eval{e}{\sigma_\pp}{v}}
+  {\conf{\pp.x := e \seq C}{\sigma} \lto{\tauat{\pp}} \conf{C}{\upd{\sigma}{\pp.x}{v}}}
+\and
+\inferrule*[lab=\rn{C|Com}]
+  {\eval{e}{\sigma_\pp}{v}}
+  {\conf{\pp.e \to \qq.x \seq C}{\sigma} \lto{\pp\to\qq} \conf{C}{\upd{\sigma}{\qq.x}{v}}}
+\\
+\inferrule*[lab=\rn{C|Cast}]
+  {\eval{e}{\sigma_\pp}{v} \\ Q = (\pn(C_1)\cup\pn(C_2))\setminus\{\pp\}}
+  {\conf{\ifcond{\pp.e}{C_1}{C_2}}{\sigma} \lto{\cast{\pp}{Q}} \conf{C_v}{\sigma}}
+\and
+\inferrule*[lab=\rn{C|Delay}]
+  {\conf{C}{\sigma} \lto{\mu} \conf{C'}{\sigma'} \\ \pn(\eta)\cap\pn(\mu) = \emptyset}
+  {\conf{\eta \seq C}{\sigma} \lto{\mu} \conf{\eta \seq C'}{\sigma'}}
+\\
+\inferrule*[lab=\rn{C|Call}]
+  {\pp\in\pn(X)}
+  {\conf{X}{\sigma} \lto{\tauat{\pp}} \conf{\rt{(\pn(X)\setminus\{\pp\})}{X}{\body{X}}}{\sigma}}
+\and
+\inferrule*[lab=\rn{C|Enter}]
+  {\pp\in P}
+  {\conf{\rt{P}{X}{C}}{\sigma} \lto{\tauat{\pp}} \conf{\rt{(P\setminus\{\pp\})}{X}{C}}{\sigma}}
+\\
+\inferrule*[lab=\rn{C|Inside}]
+  {\conf{C}{\sigma} \lto{\mu} \conf{C'}{\sigma'} \\ P\cap\pn(\mu) = \emptyset}
+  {\conf{\rt{P}{X}{C}}{\sigma} \lto{\mu} \conf{\rt{P}{X}{C'}}{\sigma'}}
+\end{mathpar}
+\caption{Semantics of choreographies.  In \rn{C|Call} and \rn{C|Enter}, a
+target of the form $\rt{\emptyset}{X}{C}$ stands for $C$.}
+\label{fig:chor-sem}
+\end{figure}
+
+Rules \rn{C|Local} and \rn{C|Com} are as in CC.  Rule \rn{C|Cast} executes a
+conditional in a single step: the guard is evaluated at $\pp$, the resulting
+boolean $v$ is announced to the receivers, and the choreography continues as
+the selected branch $C_v$.  The label $\cast{\pp}{Q}$ records the announcement
+and its recipients; the store is unchanged.
+
+Rule \rn{C|Delay} implements \emph{out-of-order execution}, which is needed
+because a network of independent processes may execute actions of different
+processes in any order.  It lets a step of the continuation $C$ happen before
+the action $\eta$, provided the processes involved are disjoint.
+
+The remaining three rules execute procedure calls, one participant at a
+time.  Rule \rn{C|Call} lets a participant $\pp$ of $X$ enter the call: the
+body of $X$ becomes active, and every other participant still has to enter.
+Rule \rn{C|Enter} lets a further participant enter; when the last one does,
+the runtime term disappears by our convention.  Rule \rn{C|Inside} lets the
+processes that have already entered proceed with the body, as long as the
+step involves no process that has not.  It plays the role of \rn{C|Delay} for
+runtime terms, with the set $P$ in place of the action $\eta$.  Entering a
+call changes no store and is labelled as an internal step of the entering
+process.
+
+\begin{remark}[No delay through a conditional]\label{rem:no-delay-cond}
+  CC has a rule allowing a step to be delayed past a conditional when both
+  branches can perform that same step, which is exactly the situation in
+  which merging is needed.  There is no such rule here, and none is needed.
+  Every receiver is waiting for $\pp$'s announcement and cannot act before
+  it, while any process that is not a receiver does not occur in either branch
+  and so has nothing to do.  The only step a configuration
+  $\conf{\ifcond{\pp.e}{C_1}{C_2}}{\sigma}$ can take is \rn{C|Cast}.  This is
+  confirmed by the network semantics in \S\ref{sec:net} and by the soundness
+  proof in \S\ref{sec:correct}.  When a conditional appears inside a runtime
+  term $\rt{P}{X}{C}$, rule \rn{C|Inside} additionally prevents the multicast
+  until every receiver has entered the call, since a receiver in $P$ is not
+  yet waiting for the announcement.
+\end{remark}
+
+\begin{remark}[Calls are entered one process at a time]\label{rem:entry}
+  In the network semantics of \S\ref{sec:net}, each process unfolds its own
+  local version of a procedure, without synchronising with the other
+  participants.  If a choreographic call unfolded the body for all
+  participants at once, as it does when calls are unfolded by a structural
+  congruence, that single step would correspond to several network steps, or
+  to none, and the correspondence between choreographies and networks could
+  only be stated up to unfolding.  Here every unfolding is a labelled step at
+  both levels.  The runtime term is what makes this possible: participants
+  may enter a call at different times, and those that have entered may make
+  progress in the body in the meantime.  It is the only runtime term in the
+  language, since a conditional is still resolved in a single step.
+\end{remark}
+
+\begin{example}\label{ex:run}
+  Continuing Example~\ref{ex:chor}, let $\sigma$ be a store with
+  $\sigma_\pp(x) = 3$, $\sigma_\qq(k) = 0$ and $\sigma_\rr(n) = 0$.  One
+  execution of the program $\Loop$ begins
+  \begin{align*}
+    \conf{\Loop}{\sigma}
+      &\lto{\tauat{\pp}} \conf{\rt{\{\qq,\rr\}}{\Loop}{\CL}}{\sigma}
+      && \text{by \rn{C|Call}}\\
+      &\lto{\tauat{\pp}} \conf{\rt{\{\qq,\rr\}}{\Loop}{\Cif}}{\sigma_1}
+      && \text{by \rn{C|Inside}, \rn{C|Local}}\\
+      &\lto{\tauat{\qq}} \conf{\rt{\{\rr\}}{\Loop}{\Cif}}{\sigma_1}
+      && \text{by \rn{C|Enter}}\\
+      &\lto{\tauat{\rr}} \conf{\Cif}{\sigma_1}
+      && \text{by \rn{C|Enter}}\\
+      &\lto{\cast{\pp}{\{\qq,\rr\}}} \conf{\qq.k := k+1 \seq \Loop}{\sigma_1}
+      && \text{by \rn{C|Cast}}\\
+      &\lto{\tauat{\pp}} \conf{\qq.k := k+1 \seq \rt{\{\qq,\rr\}}{\Loop}{\CL}}{\sigma_1}
+      && \text{by \rn{C|Delay}, \rn{C|Call}}\\
+      &\lto{\tauat{\pp}} \conf{\qq.k := k+1 \seq \rt{\{\qq,\rr\}}{\Loop}{\Cif}}{\sigma_2}
+      && \text{by \rn{C|Delay}, \rn{C|Inside}, \rn{C|Local}}\\
+      &\lto{\tauat{\rr}} \conf{\qq.k := k+1 \seq \rt{\{\qq\}}{\Loop}{\Cif}}{\sigma_2}
+      && \text{by \rn{C|Delay}, \rn{C|Enter}}\\
+      &\lto{\tauat{\qq}} \conf{\rt{\{\qq\}}{\Loop}{\Cif}}{\sigma_3}
+      && \text{by \rn{C|Local}}\\
+      &\lto{\tauat{\qq}} \conf{\Cif}{\sigma_3}
+      && \text{by \rn{C|Enter}}\\
+      &\lto{\cast{\pp}{\{\qq,\rr\}}} \conf{C_1}{\sigma_3}
+      && \text{by \rn{C|Cast}}
+  \end{align*}
+  where $\sigma_1 = \upd{\sigma}{\pp.x}{6}$,
+  $\sigma_2 = \upd{\sigma_1}{\pp.x}{12}$ and
+  $\sigma_3 = \upd{\sigma_2}{\qq.k}{1}$.  The first multicast announces
+  $\ffalse$, since $6 \not> 10$, and the second announces $\ttrue$.  From
+  $\conf{C_1}{\sigma_3}$ three further steps, by \rn{C|Local}, \rn{C|Com}
+  and \rn{C|Com}, reach $\nil$ with $\rr$ holding $z = 12$.
+
+  In the second step $\pp$ doubles $x$ before $\qq$ and $\rr$ have entered
+  the call.  After the first multicast, $\pp$ re-enters $\Loop$ and doubles
+  $x$ again while $\qq$ has not yet incremented $k$ for the previous round,
+  and $\rr$ enters as well.  At that point the second multicast is not
+  enabled: $\qq$ has not entered the call, and both \rn{C|Delay} and
+  \rn{C|Inside} forbid a step involving $\qq$.  It becomes enabled once $\qq$
+  has caught up.  Many other interleavings are possible; for instance $\qq$
+  and $\rr$ may enter the first call in either order, and $\rr$ may enter the
+  second call before or after $\pp$ doubles $x$.
+\end{example}
+
+\begin{remark}[Nesting of runtime terms]\label{rem:nesting}
+  A process may fall arbitrarily far behind the others, and runtime terms may
+  then nest.  With $X = \pp.e \to \qq.x \seq \rr.y := 1 \seq X$, processes
+  $\pp$ and $\qq$ can iterate the loop while $\rr$ has not entered even the
+  first call.  After two rounds the choreography is
+  \[
+    \rt{\{\rr\}}{X}{\big(\rr.y := 1 \seq
+      \rt{\{\rr\}}{X}{(\rr.y := 1 \seq X)}\big)},
+  \]
+  which records the actions that $\rr$ still owes.  This growth is a
+  consequence of out-of-order execution and arises equally when calls are
+  unfolded by a structural congruence.  The network state, by contrast, stays
+  small: $\rr$ is still at its call to $X$.
+\end{remark}
+
+\begin{lemma}[Store locality]\label{lem:chor-locality}
+  If $\conf{C}{\sigma} \lto{\mu} \conf{C'}{\sigma'}$ then
+  $\sigma'_\rr = \sigma_\rr$ for every $\rr \notin \pn(\mu)$.
+\end{lemma}
+\begin{proof}
+  By induction on the derivation.  \rn{C|Local} changes the store only at
+  $\pp \in \pn(\tauat\pp)$, and \rn{C|Com} only at $\qq \in \pn(\pp\to\qq)$.
+  \rn{C|Cast}, \rn{C|Call} and \rn{C|Enter} leave the store unchanged.
+  \rn{C|Delay} and \rn{C|Inside} preserve the label and the store change of
+  their premise, so the claim follows from the induction hypothesis.
+\end{proof}
+
+\section{Network Processes}
+\label{sec:net}
+
+\subsection{Syntax}
+
+\begin{definition}[Processes and networks]\label{def:net-syntax}
+  Behaviours $B$ are given by the grammar
+  \[
+  \begin{array}{r@{\;\;}c@{\;\;}l@{\qquad}l}
+    B & ::= & \nil & \text{(terminated)}\\
+      & \mid & x := e \seq B & \text{(local computation)}\\
+      & \mid & \qq!e \seq B & \text{(send to $\qq$)}\\
+      & \mid & \pp?x \seq B & \text{(receive from $\pp$ into $x$)}\\
+      & \mid & \sendbr{Q}{e}{B_1}{B_2} & \text{(send-and-branch: multicast $e$ to $Q$, branch on it)}\\
+      & \mid & \recvbr{\pp}{B_1}{B_2} & \text{(receive-and-branch: receive a boolean from $\pp$, branch on it)}\\
+      & \mid & X & \text{(procedure call)}
+  \end{array}
+  \]
+  A set of \emph{local procedure definitions} $\NDefs$ assigns to every
+  process $\rr\in\Procs$ and procedure name $X\in\Pnames$ a behaviour
+  $\ldef{\rr}{X}$, the body of $\rr$'s local procedure $X$.
+  A \emph{network} $N$ is a total function from $\Procs$ to behaviours.  We
+  write $\pp[B]$ for the network fragment mapping $\pp$ to $B$, and
+  $\pp[B] \mid N$ for the network that maps $\pp$ to $B$ and agrees with $N$
+  on all other processes (where $N$ is then understood as a function on
+  $\Procs\setminus\{\pp\}$).  Parallel composition $\mid$ is therefore
+  commutative and associative.  For a set $S\subseteq\Procs$ we write
+  $\restr{N}{S}$ for the restriction of $N$ to $S$, and we say that $N$ and
+  $M$ \emph{agree on $S$} if $\restr{N}{S} = \restr{M}{S}$.
+\end{definition}
+
+The behaviours $x := e\seq B$, $\qq!e\seq B$ and $\pp?x\seq B$ are the usual
+local assignment, send and receive.  The send-and-branch and
+receive-and-branch are the network-level counterparts of a choreographic
+conditional and are symmetric to each other.  The \emph{send-and-branch}
+$\sendbr{Q}{e}{B_1}{B_2}$ evaluates $e$ to a boolean, multicasts it to every
+process in $Q$, and continues as $B_1$ if the boolean is $\ttrue$ and as $B_2$
+if it is $\ffalse$.  The \emph{receive-and-branch} $\recvbr{\pp}{B_1}{B_2}$
+waits for a boolean from $\pp$ and continues as $B_1$ or $B_2$ accordingly.
+There is no separate local conditional: a send-and-branch with
+$Q = \emptyset$ evaluates its guard and branches without communicating, and
+we may write $\pif{e}{B_1}{B_2}$ as an abbreviation for
+$\sendbr{\emptyset}{e}{B_1}{B_2}$.  A call $X$ at process $\rr$ continues as
+$\rr$'s own body $\ldef{\rr}{X}$; each process has its own version of every
+procedure.  Both branching constructs and calls occur only in tail position.
+A network is \emph{terminated} if it maps every process to $\nil$.
+
+\subsection{Semantics}
+
+\begin{definition}[Network semantics]\label{def:net-sem}
+  Fix a set of local procedure definitions $\NDefs$.  Network configurations
+  are pairs $\conf{N}{\sigma}$ of a network and a store.  The relation
+  $\conf{N}{\sigma}\lto{\mu}\conf{N'}{\sigma'}$, with labels as in
+  Definition~\ref{def:labels}, is the least relation closed under the rules
+  in Figure~\ref{fig:net-sem}.  In rule \rn{N|Com} the processes $\pp$ and
+  $\qq$ are distinct; in rule \rn{N|Cast} the processes
+  $\pp,\qq_1,\ldots,\qq_n$ are pairwise distinct and $n\geq 0$.
+\end{definition}
+
+\begin{figure}[t]
+\begin{mathpar}
+\inferrule*[lab=\rn{N|Local}]
+  {\eval{e}{\sigma_\pp}{v}}
+  {\conf{\pp[x := e \seq B] \mid N}{\sigma} \lto{\tauat\pp} \conf{\pp[B]\mid N}{\upd{\sigma}{\pp.x}{v}}}
+\and
+\inferrule*[lab=\rn{N|Com}]
+  {\eval{e}{\sigma_\pp}{v}}
+  {\conf{\pp[\qq!e \seq B] \mid \qq[\pp?x \seq B'] \mid N}{\sigma} \lto{\pp\to\qq} \conf{\pp[B]\mid\qq[B']\mid N}{\upd{\sigma}{\qq.x}{v}}}
+\\
+\inferrule*[lab=\rn{N|Cast}]
+  {\eval{e}{\sigma_\pp}{v} \\ Q = \{\qq_1,\ldots,\qq_n\}}
+  {\conf{\pp[\sendbr{Q}{e}{B^1}{B^2}] \mid \textstyle\prod_{i=1}^{n}\qq_i[\recvbr{\pp}{B_i^1}{B_i^2}] \mid N}{\sigma}
+   \lto{\cast{\pp}{Q}}
+   \conf{\pp[B^v] \mid \textstyle\prod_{i=1}^{n}\qq_i[B_i^v] \mid N}{\sigma}}
+\\
+\inferrule*[lab=\rn{N|Call}]
+  { }
+  {\conf{\pp[X] \mid N}{\sigma} \lto{\tauat\pp} \conf{\pp[\ldef{\pp}{X}] \mid N}{\sigma}}
+\end{mathpar}
+\caption{Semantics of networks.  In \rn{N|Cast}, $B^v$ denotes $B^1$ if $v=\ttrue$ and $B^2$ if $v=\ffalse$, and likewise for $B_i^v$.}
+\label{fig:net-sem}
+\end{figure}
+
+Communication is synchronous.  Rule \rn{N|Cast} is a synchronous
+one-to-many rendezvous: in a single step the sender evaluates its guard,
+every receiver in $Q$ receives the boolean, and the sender and all receivers
+select their continuations.  With $Q=\emptyset$ the rule degenerates to a
+local conditional at $\pp$, still labelled $\cast{\pp}{\emptyset}$.  Rule
+\rn{N|Call} unfolds a call locally, without synchronising with any other
+process; it is labelled as an internal step.  No network counterpart of the
+choreographic runtime term is needed: a call that has been entered by some
+of its participants is simply a network in which some processes are still
+at the call and the others are executing their local bodies.  No structural
+rule for parallel composition is needed because networks are functions and
+each rule carries the untouched part of the network as $N$.
+
+\section{Endpoint Projection}
+\label{sec:epp}
+
+\begin{definition}[Endpoint projection]\label{def:epp}
+  The projection $\proj{C}{\rr}$ of a choreography $C$ onto a process
+  $\rr\in\Procs$ is defined by structural recursion on $C$:
+  \[
+  \begin{array}{l@{\;\;}l@{\quad}l}
+    \proj{\nil}{\rr} & = \nil \\[1ex]
+    \proj{\pp.x := e \seq C}{\rr} & = x := e \seq \proj{C}{\rr} & \text{if } \rr = \pp\\
+                                  & = \proj{C}{\rr} & \text{otherwise}\\[1ex]
+    \proj{\pp.e \to \qq.x \seq C}{\rr} & = \qq!e \seq \proj{C}{\rr} & \text{if } \rr = \pp\\
+                                       & = \pp?x \seq \proj{C}{\rr} & \text{if } \rr = \qq\\
+                                       & = \proj{C}{\rr} & \text{otherwise}\\[1ex]
+    \proj{\ifcond{\pp.e}{C_1}{C_2}}{\rr} & = \sendbr{Q}{e}{\proj{C_1}{\pp}}{\proj{C_2}{\pp}} & \text{if } \rr = \pp\\
+                                         & = \recvbr{\pp}{\proj{C_1}{\rr}}{\proj{C_2}{\rr}} & \text{if } \rr \in Q\\
+                                         & = \nil & \text{otherwise}\\[1ex]
+    \proj{X}{\rr} & = X & \text{if } \rr \in \pn(X)\\
+                  & = \nil & \text{otherwise}\\[1ex]
+    \proj{\rt{P}{X}{C}}{\rr} & = X & \text{if } \rr \in P\\
+                             & = \proj{C}{\rr} & \text{otherwise}
+  \end{array}
+  \]
+  where, in the conditional case, $Q = (\pn(C_1)\cup\pn(C_2))\setminus\{\pp\}$
+  is the set of receivers.  The projection of $C$ is the network
+  $\projn{C}$ with $\projn{C}(\rr) = \proj{C}{\rr}$ for every $\rr\in\Procs$,
+  and the projection of a configuration is
+  $\projn{C,\sigma} = \conf{\projn{C}}{\sigma}$.  The projection of the
+  procedure definitions $\Defs$ is the set of local procedure definitions
+  $\projn{\Defs}$ given by $\projn{\Defs}_\rr(X) = \proj{\body{X}}{\rr}$ for
+  every $\rr\in\Procs$ and $X\in\Pnames$.
+\end{definition}
+
+The cases for $\nil$ and for actions are standard.  A conditional at $\pp$
+projects onto $\pp$ as a send-and-branch whose target set is the receivers and
+whose continuations are the projections of the two branches onto $\pp$.  It
+projects onto a receiver $\rr\in Q$ as a receive-and-branch from $\pp$ whose
+two continuations are the projections of the two branches onto $\rr$; if $\rr$
+does not occur in one of the branches, the corresponding continuation is
+$\nil$.  A process that is neither $\pp$ nor a receiver projects to $\nil$,
+because it occurs in neither branch.
+
+A call projects onto each participant of the procedure as a call to that
+participant's local version of the procedure, and onto every other process as
+$\nil$.  Calls are not unfolded by projection: the bodies are projected
+separately, once, to obtain $\projn{\Defs}$.  A runtime term $\rt{P}{X}{C}$
+projects onto a process that has not yet entered the call as the call $X$,
+and onto every other process as the projection of the current state $C$ of
+the body.
+
+\begin{remark}[Totality]\label{rem:total}
+  Projection is a total function, both on choreographies and on procedure
+  definitions: every choreography is projectable.  In CC, the projection of a
+  conditional onto a process that is not the guard requires merging the
+  projections of the two branches, an operation that is only defined when the
+  two behaviours agree up to the selections that distinguish them; programs
+  in which a process behaves differently in the two branches without first
+  being informed by a selection are rejected.  Here the announcement of the
+  guard is built into the semantics of the conditional and is directed to
+  \emph{every} process that occurs in either branch, including processes
+  that occur only through a procedure call, so the situation that merging is
+  designed to handle never arises.  The price is that every participant of a
+  conditional always receives a message, even one whose behaviour is
+  identical in both branches.
+\end{remark}
+
+\begin{example}\label{ex:epp}
+  The projection of the program $\Loop$ from Example~\ref{ex:chor} is the
+  network $\pp[\Loop] \mid \qq[\Loop] \mid \rr[\Loop]$, and the projected
+  local procedure definitions are
+  \[
+  \begin{array}{l@{\;=\;}l}
+    \projn{\Defs}_\pp(\Loop) & x := 2\cdot x \seq \sendbr{\{\qq,\rr\}}{(x > 10)}{\qq!x \seq \nil}{\Loop}\\
+    \projn{\Defs}_\qq(\Loop) & \recvbr{\pp}{\pp?y \seq \rr!y \seq \nil}{k := k+1 \seq \Loop}\\
+    \projn{\Defs}_\rr(\Loop) & \recvbr{\pp}{n := n+1 \seq \qq?z \seq \nil}{\Loop}.
+  \end{array}
+  \]
+  Process $\rr$ acts only in the round that ends the loop, but as a receiver
+  of the conditional it receives the guard in every round, and in a round
+  that does not end the loop its only action is to call $\Loop$ again.  In CC
+  this cost would not be avoided: $\rr$'s behaviours in the two branches
+  differ, so a selection informing $\rr$ would be needed in every round as
+  well.
+
+  Reading the execution in Example~\ref{ex:run} through the projection,
+  after the first multicast $\pp$ and $\rr$ are at the call $\Loop$ and $\qq$
+  is at $k := k+1 \seq \Loop$, which is exactly the projection of $C_2$.
+  After the next three steps, in which $\pp$ unfolds its call and doubles $x$
+  and $\rr$ unfolds its call, $\pp$ is at a send-and-branch to $\{\qq,\rr\}$
+  and $\rr$ at a receive-and-branch, but $\qq$ is still at
+  $k := k+1 \seq \Loop$, so \rn{N|Cast} does not apply.  This network is
+  exactly the projection of
+  $\qq.k := k+1 \seq \rt{\{\qq\}}{\Loop}{\Cif}$.
+\end{example}
+
+\section{Correctness of Endpoint Projection}
+\label{sec:correct}
+
+Throughout this section, the network semantics is taken with respect to the
+projected definitions $\NDefs = \projn{\Defs}$, so that
+$\ldef{\rr}{X} = \proj{\body{X}}{\rr}$.  We prove that a well-formed
+choreography and its projection have exactly the same labelled transitions,
+and that the projection of the target of a choreographic step is the target
+of the corresponding network step.  Well-formedness
+(\S\ref{sec:wf}) constrains runtime terms only; it holds for every source
+choreography and is preserved by execution.
+
+\subsection{Auxiliary lemmas}
+
+\begin{lemma}[Network locality and framing]\label{lem:frame}
+  Suppose $\conf{N}{\sigma}\lto{\mu}\conf{N'}{\sigma'}$.
+  \begin{enumerate}[label=(\roman*),nosep]
+  \item\label{it:frame-loc} $N'(\rr) = N(\rr)$ and $\sigma'_\rr = \sigma_\rr$ for every $\rr\notin\pn(\mu)$.
+  \item\label{it:frame-frame} For every network $M$ that agrees with $N$ on
+    $\pn(\mu)$, $\conf{M}{\sigma}\lto{\mu}\conf{M'}{\sigma'}$, where $M'$
+    agrees with $N'$ on $\pn(\mu)$ and with $M$ on $\Procs\setminus\pn(\mu)$.
+  \end{enumerate}
+\end{lemma}
+\begin{proof}
+  By inspection of Figure~\ref{fig:net-sem}.  In each rule, the processes
+  displayed explicitly on the left-hand side are exactly the processes in
+  $\pn(\mu)$: $\pp$ for \rn{N|Local} and \rn{N|Call}, $\pp$ and $\qq$ for
+  \rn{N|Com}, and $\pp,\qq_1,\ldots,\qq_n$ for \rn{N|Cast}.  The rest of the
+  network is passed through as $N$ unchanged, and the store is modified only
+  at a process in $\pn(\mu)$, which gives~\ref{it:frame-loc}.
+  For~\ref{it:frame-frame}, the premises of each rule mention only the
+  behaviours of the processes in $\pn(\mu)$, the store $\sigma$ and the fixed
+  definitions $\NDefs$; if $M$ agrees with $N$ on $\pn(\mu)$ then the same
+  rule instance applies to $\conf{M}{\sigma}$, with the remainder
+  $\restr{M}{\Procs\setminus\pn(\mu)}$ in place of
+  $\restr{N}{\Procs\setminus\pn(\mu)}$, yielding the same label, the same
+  behaviours at $\pn(\mu)$ and the same store $\sigma'$.
+\end{proof}
+
+\begin{lemma}[Inversion for networks]\label{lem:inversion}
+  Suppose $\conf{N}{\sigma}\lto{\mu}\conf{N'}{\sigma'}$ and $\rr\in\pn(\mu)$.
+  Then $N(\rr)\neq\nil$, and exactly one of the following holds.
+  \begin{enumerate}[label=(\alph*),nosep]
+  \item\label{it:inv-local} $N(\rr) = x := e\seq B$; then the rule is \rn{N|Local}, $\mu = \tauat\rr$, $N'(\rr) = B$, and $\sigma' = \upd{\sigma}{\rr.x}{v}$ where $\eval{e}{\sigma_\rr}{v}$.
+  \item\label{it:inv-send} $N(\rr) = \qq!e\seq B$; then the rule is \rn{N|Com}, $\mu = \rr\to\qq$, $N(\qq) = \rr?x\seq B'$ for some $x$ and $B'$, $N'(\rr) = B$, $N'(\qq) = B'$, and $\sigma' = \upd{\sigma}{\qq.x}{v}$ where $\eval{e}{\sigma_\rr}{v}$.
+  \item\label{it:inv-recv} $N(\rr) = \pp?x\seq B$; then the rule is \rn{N|Com}, $\mu = \pp\to\rr$, $N(\pp) = \rr!e\seq B'$ for some $e$ and $B'$, $N'(\rr) = B$, $N'(\pp) = B'$, and $\sigma' = \upd{\sigma}{\rr.x}{v}$ where $\eval{e}{\sigma_\pp}{v}$.
+  \item\label{it:inv-cast} $N(\rr) = \sendbr{Q}{e}{B^1}{B^2}$; then the rule is \rn{N|Cast}, $\mu = \cast{\rr}{Q}$, $N(\qq) = \recvbr{\rr}{B_\qq^1}{B_\qq^2}$ for every $\qq\in Q$, $N'(\rr) = B^v$ and $N'(\qq) = B_\qq^v$ for every $\qq\in Q$, where $\eval{e}{\sigma_\rr}{v}$, and $\sigma' = \sigma$.
+  \item\label{it:inv-brecv} $N(\rr) = \recvbr{\pp}{B_1}{B_2}$; then the rule is \rn{N|Cast}, $\mu = \cast{\pp}{Q}$ for some $Q$ with $\rr\in Q$, $N(\pp) = \sendbr{Q}{e}{B^1}{B^2}$ for some $e$, $B^1$, $B^2$, $N'(\rr) = B_v$ where $\eval{e}{\sigma_\pp}{v}$, and $\sigma' = \sigma$.
+  \item\label{it:inv-call} $N(\rr) = X$; then the rule is \rn{N|Call}, $\mu = \tauat\rr$, $N'(\rr) = \ldef{\rr}{X}$, and $\sigma' = \sigma$.
+  \end{enumerate}
+\end{lemma}
+\begin{proof}
+  By inspection of Figure~\ref{fig:net-sem}.  In every rule, each process in
+  $\pn(\mu)$ is displayed on the left-hand side with a behaviour of one of the
+  six non-terminated shapes, so $N(\rr)\neq\nil$.  The six shapes are
+  pairwise distinct, and each shape occurs in exactly one role of exactly one
+  rule: assignment only as the subject of \rn{N|Local}, send and receive only
+  as the sender and receiver of \rn{N|Com}, send-and-branch and
+  receive-and-branch only as the sender and a receiver of \rn{N|Cast}, and
+  call only as the subject of \rn{N|Call}.  Hence the shape of $N(\rr)$
+  determines the rule and the role of $\rr$ in it, and the remaining claims
+  in each item are read off from that rule.
+\end{proof}
+
+\begin{lemma}[Projection and process names]\label{lem:proj-prefix}
+  \begin{enumerate}[label=(\roman*),nosep]
+  \item\label{it:pp-act} If $\rr\notin\pn(\eta)$ then $\proj{\eta\seq C}{\rr} = \proj{C}{\rr}$.
+  \item\label{it:pp-rt} For every $P\subseteq\Procs$, possibly empty,
+    $\pn(\rt{P}{X}{C}) = P\cup\pn(C)$, and $\proj{\rt{P}{X}{C}}{\rr}$ is $X$
+    if $\rr\in P$ and $\proj{C}{\rr}$ otherwise.
+  \item\label{it:pp-nil} $\proj{C}{\rr} = \nil$ if and only if $\rr\notin\pn(C)$.
+  \end{enumerate}
+\end{lemma}
+\begin{proof}
+  \ref{it:pp-act} is immediate from Definition~\ref{def:epp}.
+  \ref{it:pp-rt} is immediate from Definitions~\ref{def:pn}
+  and~\ref{def:epp} when $P\neq\emptyset$; when $P=\emptyset$, the notation
+  $\rt{P}{X}{C}$ stands for $C$, and $\rr\notin P$ for every $\rr$.
+  \ref{it:pp-nil} is by induction on $C$.  For $\nil$ both sides hold.  For
+  $\eta\seq C'$, if $\rr\in\pn(\eta)$ then $\proj{\eta\seq C'}{\rr}$ starts
+  with an assignment, a send or a receive, and $\rr\in\pn(\eta\seq C')$;
+  otherwise use \ref{it:pp-act} and the induction hypothesis.  For a
+  conditional at $\pp$ with receivers $Q$, we have $\pn(C) = \{\pp\}\cup Q$,
+  and the projection is a send-and-branch at $\pp$, a receive-and-branch at
+  each $\rr\in Q$ and $\nil$ elsewhere.  For a call $X$, the claim is the
+  definition of $\proj{X}{\rr}$.  For $\rt{P}{X}{C'}$, if $\rr\in P$ the
+  projection is $X$ and $\rr\in\pn(C)$; otherwise the projection is
+  $\proj{C'}{\rr}$ and $\rr\in\pn(C)$ iff $\rr\in\pn(C')$, and we use the
+  induction hypothesis.
+\end{proof}
+
+\begin{lemma}[Projection invariance]\label{lem:proj-inv}
+  If $\conf{C}{\sigma}\lto{\mu}\conf{C'}{\sigma'}$ and $\rr\notin\pn(\mu)$,
+  then $\proj{C'}{\rr} = \proj{C}{\rr}$.
+\end{lemma}
+\begin{proof}
+  By induction on the derivation of the transition.
+
+  \case{\rn{C|Local}}
+  $C = \pp.x := e\seq C'$ with $\rr\neq\pp$.  By
+  Lemma~\ref{lem:proj-prefix}\ref{it:pp-act}, $\proj{C}{\rr} = \proj{C'}{\rr}$.
+
+  \case{\rn{C|Com}}
+  $C = \pp.e\to\qq.x\seq C'$ with $\rr\notin\{\pp,\qq\}$.  As in the previous
+  case.
+
+  \case{\rn{C|Cast}}
+  $C = \ifcond{\pp.e}{C_1}{C_2}$, $C' = C_v$ and
+  $\rr\notin\{\pp\}\cup Q = \pn(C)$.  Then $\proj{C}{\rr} = \nil$ by
+  definition, and since $\rr\notin\pn(C_v)$, also $\proj{C_v}{\rr} = \nil$ by
+  Lemma~\ref{lem:proj-prefix}\ref{it:pp-nil}.
+
+  \case{\rn{C|Delay}}
+  $C = \eta\seq C_0$ and $C' = \eta\seq C_0'$ with
+  $\conf{C_0}{\sigma}\lto{\mu}\conf{C_0'}{\sigma'}$.  The induction
+  hypothesis gives $\proj{C_0'}{\rr} = \proj{C_0}{\rr}$.  If $\rr\notin\pn(\eta)$
+  the claim follows from Lemma~\ref{lem:proj-prefix}\ref{it:pp-act}.  If
+  $\rr\in\pn(\eta)$, then by Definition~\ref{def:epp} both $\proj{C}{\rr}$ and
+  $\proj{C'}{\rr}$ consist of the same prefix (an assignment, a send or a
+  receive, determined by $\eta$ and $\rr$) followed by $\proj{C_0}{\rr}$,
+  respectively $\proj{C_0'}{\rr}$, which are equal.
+
+  \case{\rn{C|Call}}
+  $C = X$, $\mu = \tauat\pp$ and $C' = \rt{(\pn(X)\setminus\{\pp\})}{X}{\body{X}}$,
+  with $\rr\neq\pp$.  If $\rr\in\pn(X)$, then $\rr\in\pn(X)\setminus\{\pp\}$
+  and both projections are $X$, by Definition~\ref{def:epp} and
+  Lemma~\ref{lem:proj-prefix}\ref{it:pp-rt}.  Otherwise $\proj{C}{\rr} = \nil$,
+  and $\proj{C'}{\rr} = \proj{\body{X}}{\rr} = \nil$ by
+  Lemma~\ref{lem:proj-prefix}\ref{it:pp-rt} and~\ref{it:pp-nil}, since
+  $\rr\notin\pn(X) = \pn(\body{X})$ by Lemma~\ref{lem:pn-body}.
+
+  \case{\rn{C|Enter}}
+  $C = \rt{P}{X}{C_0}$, $\mu = \tauat\pp$ and $C' = \rt{(P\setminus\{\pp\})}{X}{C_0}$,
+  with $\rr\neq\pp$.  Then $\rr\in P$ iff $\rr\in P\setminus\{\pp\}$, so by
+  Lemma~\ref{lem:proj-prefix}\ref{it:pp-rt} both projections are $X$ or both
+  are $\proj{C_0}{\rr}$.
+
+  \case{\rn{C|Inside}}
+  $C = \rt{P}{X}{C_0}$ and $C' = \rt{P}{X}{C_0'}$ with
+  $\conf{C_0}{\sigma}\lto{\mu}\conf{C_0'}{\sigma'}$.  If $\rr\in P$ both
+  projections are $X$.  Otherwise they are $\proj{C_0}{\rr}$ and
+  $\proj{C_0'}{\rr}$, which are equal by the induction hypothesis.
+\end{proof}
+
+\subsection{Well-formedness}
+\label{sec:wf}
+
+A process in $P$ that has not yet entered a call $\rt{P}{X}{C}$ is, in the
+projection, still at its call to $X$; when it enters, it will continue as its
+local body $\proj{\body{X}}{\rr}$.  For the choreography and the network to
+stay in step, the body's current state $C$ must still expect exactly that
+behaviour from $\rr$.
+
+\begin{definition}[Well-formedness]\label{def:wf}
+  The set of \emph{well-formed} choreographies is the least set such that
+  $\nil$ and every call $X$ are well-formed; $\eta\seq C$ is well-formed if
+  $C$ is; $\ifcond{\pp.e}{C_1}{C_2}$ is well-formed if $C_1$ and $C_2$ are; and
+  $\rt{P}{X}{C}$ is well-formed if $C$ is well-formed and
+  \[
+    \proj{C}{\rr} = \proj{\body{X}}{\rr}\qquad\text{for every } \rr\in P.
+  \]
+  A configuration $\conf{C}{\sigma}$ is well-formed if $C$ is.
+\end{definition}
+
+Every source choreography is well-formed, since the only constraint concerns
+runtime terms.  The last clause also holds for $P=\emptyset$ under our
+convention: $\rt{\emptyset}{X}{C}$, which is $C$, is well-formed if and only
+if $C$ is.
+
+\begin{example}\label{ex:not-wf}
+  Without well-formedness the correctness results fail.  Let
+  $X = \pp.e\to\qq.x\seq X$ and $C = \rt{\{\qq\}}{X}{\nil}$, which is not
+  well-formed because $\proj{\nil}{\qq} = \nil \neq \pp?x\seq X = \proj{\body{X}}{\qq}$.
+  By \rn{C|Enter}, $\conf{C}{\sigma}\lto{\tauat\qq}\conf{\nil}{\sigma}$, which
+  is terminated.  The projection $\projn{C}$ maps $\qq$ to $X$ and every
+  other process to $\nil$; its only step unfolds $\qq$'s call to
+  $\pp?x\seq X$, after which $\qq$ waits forever for a message from $\pp$.
+\end{example}
+
+\begin{lemma}[Preservation of well-formedness]\label{lem:wf-pres}
+  If $C$ is well-formed and $\conf{C}{\sigma}\lto{\mu}\conf{C'}{\sigma'}$,
+  then $C'$ is well-formed.
+\end{lemma}
+\begin{proof}
+  By induction on the derivation of the transition.  For \rn{C|Local} and
+  \rn{C|Com}, $C'$ is a subterm of $C$, and for \rn{C|Cast} it is a branch of
+  $C$; subterms of well-formed choreographies are well-formed.  For
+  \rn{C|Delay}, $C = \eta\seq C_0$ and $C' = \eta\seq C_0'$, and $C_0'$ is
+  well-formed by the induction hypothesis.
+
+  For \rn{C|Call}, $C' = \rt{(\pn(X)\setminus\{\pp\})}{X}{\body{X}}$.  The
+  body $\body{X}$ is a source choreography, hence well-formed, and the
+  required equation $\proj{\body{X}}{\rr} = \proj{\body{X}}{\rr}$ is trivial.
+
+  For \rn{C|Enter}, $C = \rt{P}{X}{C_0}$ and
+  $C' = \rt{(P\setminus\{\pp\})}{X}{C_0}$.  Since $C$ is well-formed, $C_0$ is
+  well-formed and the required equation holds for every $\rr\in P$, so in
+  particular for every $\rr\in P\setminus\{\pp\}$.
+
+  For \rn{C|Inside}, $C = \rt{P}{X}{C_0}$ and $C' = \rt{P}{X}{C_0'}$ with
+  $\conf{C_0}{\sigma}\lto{\mu}\conf{C_0'}{\sigma'}$ and
+  $P\cap\pn(\mu)=\emptyset$.  The induction hypothesis gives that $C_0'$ is
+  well-formed.  For $\rr\in P$ we have $\rr\notin\pn(\mu)$, so
+  Lemma~\ref{lem:proj-inv} and the well-formedness of $C$ give
+  $\proj{C_0'}{\rr} = \proj{C_0}{\rr} = \proj{\body{X}}{\rr}$.
+\end{proof}
+
+\subsection{Completeness}
+
+\begin{theorem}[Completeness]\label{thm:completeness}
+  If $C$ is well-formed and $\conf{C}{\sigma}\lto{\mu}\conf{C'}{\sigma'}$, then
+  \[
+    \conf{\projn{C}}{\sigma}\lto{\mu}\conf{\projn{C'}}{\sigma'}.
+  \]
+\end{theorem}
+\begin{proof}
+  By induction on the derivation of the transition.  Subterms of a
+  well-formed choreography are well-formed, so the induction hypothesis
+  applies to the premise of \rn{C|Delay} and of \rn{C|Inside}.
+
+  \case{\rn{C|Local}}
+  $C = \pp.x := e\seq C'$, $\mu = \tauat\pp$, $\eval{e}{\sigma_\pp}{v}$ and
+  $\sigma' = \upd{\sigma}{\pp.x}{v}$.  We have $\proj{C}{\pp} = x := e\seq\proj{C'}{\pp}$
+  and $\proj{C}{\rr} = \proj{C'}{\rr}$ for $\rr\neq\pp$.  Rule \rn{N|Local}
+  gives $\conf{\projn{C}}{\sigma}\lto{\tauat\pp}\conf{N'}{\sigma'}$ with
+  $N'(\pp) = \proj{C'}{\pp}$ and $N'(\rr) = \proj{C}{\rr} = \proj{C'}{\rr}$
+  otherwise, so $N' = \projn{C'}$.
+
+  \case{\rn{C|Com}}
+  $C = \pp.e\to\qq.x\seq C'$, $\mu = \pp\to\qq$, $\eval{e}{\sigma_\pp}{v}$ and
+  $\sigma' = \upd{\sigma}{\qq.x}{v}$.  We have
+  $\proj{C}{\pp} = \qq!e\seq\proj{C'}{\pp}$, $\proj{C}{\qq} = \pp?x\seq\proj{C'}{\qq}$
+  and $\proj{C}{\rr} = \proj{C'}{\rr}$ otherwise.  Rule \rn{N|Com} gives a
+  transition labelled $\pp\to\qq$ to $\conf{\projn{C'}}{\sigma'}$.
+
+  \case{\rn{C|Cast}}
+  $C = \ifcond{\pp.e}{C_1}{C_2}$, $C' = C_v$, $\mu = \cast{\pp}{Q}$ with
+  $Q = (\pn(C_1)\cup\pn(C_2))\setminus\{\pp\}$, $\eval{e}{\sigma_\pp}{v}$ and
+  $\sigma' = \sigma$.  By Definition~\ref{def:epp},
+  $\proj{C}{\pp} = \sendbr{Q}{e}{\proj{C_1}{\pp}}{\proj{C_2}{\pp}}$,
+  $\proj{C}{\qq} = \recvbr{\pp}{\proj{C_1}{\qq}}{\proj{C_2}{\qq}}$ for $\qq\in Q$,
+  and $\proj{C}{\rr} = \nil$ for $\rr\notin\{\pp\}\cup Q$.  Rule \rn{N|Cast}
+  applies and gives $\conf{\projn{C}}{\sigma}\lto{\cast{\pp}{Q}}\conf{N'}{\sigma}$
+  with $N'(\pp) = \proj{C_v}{\pp}$, $N'(\qq) = \proj{C_v}{\qq}$ for $\qq\in Q$
+  and $N'(\rr) = \nil$ for $\rr\notin\{\pp\}\cup Q$.  For the last group,
+  $\rr\notin\pn(C_v)$, so $\proj{C_v}{\rr} = \nil = N'(\rr)$ by
+  Lemma~\ref{lem:proj-prefix}\ref{it:pp-nil}.  Hence $N' = \projn{C_v} = \projn{C'}$.
+
+  \case{\rn{C|Delay}}
+  $C = \eta\seq C_0$ and $C' = \eta\seq C_0'$ with
+  $\conf{C_0}{\sigma}\lto{\mu}\conf{C_0'}{\sigma'}$ and
+  $\pn(\eta)\cap\pn(\mu) = \emptyset$.  The induction hypothesis gives
+  $\conf{\projn{C_0}}{\sigma}\lto{\mu}\conf{\projn{C_0'}}{\sigma'}$.  By
+  Lemma~\ref{lem:proj-prefix}\ref{it:pp-act}, $\projn{C}$ agrees with
+  $\projn{C_0}$ on $\pn(\mu)$, since $\pn(\mu)$ is disjoint from $\pn(\eta)$.
+  By Lemma~\ref{lem:frame}\ref{it:frame-frame},
+  $\conf{\projn{C}}{\sigma}\lto{\mu}\conf{N'}{\sigma'}$ where
+  $N'(\rr) = \proj{C_0'}{\rr}$ for $\rr\in\pn(\mu)$ and $N'(\rr) = \proj{C}{\rr}$
+  otherwise.  It remains to show $N' = \projn{C'}$.  For $\rr\in\pn(\mu)$ we
+  have $\rr\notin\pn(\eta)$, so $\proj{C'}{\rr} = \proj{C_0'}{\rr} = N'(\rr)$.
+  For $\rr\notin\pn(\mu)$, Lemma~\ref{lem:proj-inv} gives
+  $\proj{C_0'}{\rr} = \proj{C_0}{\rr}$, and therefore
+  $\proj{\eta\seq C_0'}{\rr} = \proj{\eta\seq C_0}{\rr} = N'(\rr)$, since both
+  sides either add the same prefix to equal projections (if $\rr\in\pn(\eta)$)
+  or are the equal projections themselves.
+
+  \case{\rn{C|Call}}
+  $C = X$, $\mu = \tauat\pp$ with $\pp\in\pn(X)$,
+  $C' = \rt{(\pn(X)\setminus\{\pp\})}{X}{\body{X}}$ and $\sigma' = \sigma$.
+  Since $\proj{C}{\pp} = X$, rule \rn{N|Call} gives
+  $\conf{\projn{C}}{\sigma}\lto{\tauat\pp}\conf{N'}{\sigma}$ with
+  $N'(\pp) = \ldef{\pp}{X} = \proj{\body{X}}{\pp}$ and $N'(\rr) = \proj{C}{\rr}$
+  for $\rr\neq\pp$.  Since $\pp\notin\pn(X)\setminus\{\pp\}$,
+  Lemma~\ref{lem:proj-prefix}\ref{it:pp-rt} gives
+  $\proj{C'}{\pp} = \proj{\body{X}}{\pp} = N'(\pp)$, and for $\rr\neq\pp$
+  Lemma~\ref{lem:proj-inv} gives $\proj{C'}{\rr} = \proj{C}{\rr} = N'(\rr)$.
+  Hence $N' = \projn{C'}$.
+
+  \case{\rn{C|Enter}}
+  $C = \rt{P}{X}{C_0}$, $\mu = \tauat\pp$ with $\pp\in P$,
+  $C' = \rt{(P\setminus\{\pp\})}{X}{C_0}$ and $\sigma' = \sigma$.  Since
+  $\proj{C}{\pp} = X$, rule \rn{N|Call} gives
+  $\conf{\projn{C}}{\sigma}\lto{\tauat\pp}\conf{N'}{\sigma}$ with
+  $N'(\pp) = \proj{\body{X}}{\pp}$ and $N'(\rr) = \proj{C}{\rr}$ for
+  $\rr\neq\pp$.  By Lemma~\ref{lem:proj-prefix}\ref{it:pp-rt} and the
+  well-formedness of $C$, $\proj{C'}{\pp} = \proj{C_0}{\pp} = \proj{\body{X}}{\pp} = N'(\pp)$.
+  For $\rr\neq\pp$, Lemma~\ref{lem:proj-inv} gives
+  $\proj{C'}{\rr} = \proj{C}{\rr} = N'(\rr)$.  Hence $N' = \projn{C'}$.
+
+  \case{\rn{C|Inside}}
+  $C = \rt{P}{X}{C_0}$ and $C' = \rt{P}{X}{C_0'}$ with
+  $\conf{C_0}{\sigma}\lto{\mu}\conf{C_0'}{\sigma'}$ and
+  $P\cap\pn(\mu) = \emptyset$.  The induction hypothesis gives
+  $\conf{\projn{C_0}}{\sigma}\lto{\mu}\conf{\projn{C_0'}}{\sigma'}$.  By
+  Definition~\ref{def:epp}, $\projn{C}$ agrees with $\projn{C_0}$ on
+  $\pn(\mu)$, since $\pn(\mu)$ is disjoint from $P$.  By
+  Lemma~\ref{lem:frame}\ref{it:frame-frame},
+  $\conf{\projn{C}}{\sigma}\lto{\mu}\conf{N'}{\sigma'}$ where
+  $N'(\rr) = \proj{C_0'}{\rr}$ for $\rr\in\pn(\mu)$ and
+  $N'(\rr) = \proj{C}{\rr}$ otherwise.  For $\rr\in\pn(\mu)$ we have
+  $\rr\notin P$, so $\proj{C'}{\rr} = \proj{C_0'}{\rr} = N'(\rr)$.  For
+  $\rr\notin\pn(\mu)$, Lemma~\ref{lem:proj-inv} gives
+  $\proj{C'}{\rr} = \proj{C}{\rr} = N'(\rr)$.  Hence $N' = \projn{C'}$.
+\end{proof}
+
+\subsection{Soundness}
+
+\begin{theorem}[Soundness]\label{thm:soundness}
+  If $C$ is well-formed and $\conf{\projn{C}}{\sigma}\lto{\mu}\conf{N'}{\sigma'}$,
+  then there is a choreography $C'$ such that
+  \[
+    \conf{C}{\sigma}\lto{\mu}\conf{C'}{\sigma'}
+    \qquad\text{and}\qquad
+    N' = \projn{C'}.
+  \]
+\end{theorem}
+\begin{proof}
+  By structural induction on $C$.  Throughout, $N$ denotes $\projn{C}$.
+  Subterms of a well-formed choreography are well-formed, so the induction
+  hypothesis applies to them.
+
+  \case{$C = \nil$}
+  Every process of $N$ is $\nil$, so by Lemma~\ref{lem:inversion} no
+  transition is possible and there is nothing to prove.
+
+  \case{$C = \eta\seq C_0$}
+  We distinguish whether the step involves a process of $\eta$.
+
+  \subcase{$\pn(\eta)\cap\pn(\mu) \neq \emptyset$}
+  First let $\eta = \pp.x := e$, so that $\pp\in\pn(\mu)$ and
+  $N(\pp) = x := e\seq\proj{C_0}{\pp}$.  By
+  Lemma~\ref{lem:inversion}\ref{it:inv-local}, $\mu = \tauat\pp$,
+  $\sigma' = \upd{\sigma}{\pp.x}{v}$ with $\eval{e}{\sigma_\pp}{v}$, and
+  $N'(\pp) = \proj{C_0}{\pp}$; by Lemma~\ref{lem:frame}\ref{it:frame-loc},
+  $N'(\rr) = N(\rr) = \proj{C_0}{\rr}$ for $\rr\neq\pp$
+  (Lemma~\ref{lem:proj-prefix}\ref{it:pp-act}).  Hence $N' = \projn{C_0}$,
+  and \rn{C|Local} gives $\conf{C}{\sigma}\lto{\tauat\pp}\conf{C_0}{\sigma'}$;
+  take $C' = C_0$.
+
+  Now let $\eta = \pp.e\to\qq.x$, so that $N(\pp) = \qq!e\seq\proj{C_0}{\pp}$
+  and $N(\qq) = \pp?x\seq\proj{C_0}{\qq}$, and $\pp\in\pn(\mu)$ or
+  $\qq\in\pn(\mu)$.  In the first case Lemma~\ref{lem:inversion}\ref{it:inv-send}
+  applies to $\pp$; in the second case Lemma~\ref{lem:inversion}\ref{it:inv-recv}
+  applies to $\qq$.  Either way we obtain $\mu = \pp\to\qq$,
+  $\sigma' = \upd{\sigma}{\qq.x}{v}$ with $\eval{e}{\sigma_\pp}{v}$,
+  $N'(\pp) = \proj{C_0}{\pp}$ and $N'(\qq) = \proj{C_0}{\qq}$, and by
+  Lemma~\ref{lem:frame}\ref{it:frame-loc} and
+  Lemma~\ref{lem:proj-prefix}\ref{it:pp-act}, $N'(\rr) = \proj{C_0}{\rr}$ for
+  all other $\rr$.  Hence $N' = \projn{C_0}$, and \rn{C|Com} gives
+  $\conf{C}{\sigma}\lto{\pp\to\qq}\conf{C_0}{\sigma'}$; take $C' = C_0$.
+
+  \subcase{$\pn(\eta)\cap\pn(\mu) = \emptyset$}
+  By Lemma~\ref{lem:proj-prefix}\ref{it:pp-act}, $\projn{C_0}$ agrees with
+  $N$ on $\pn(\mu)$.  By Lemma~\ref{lem:frame}\ref{it:frame-frame},
+  $\conf{\projn{C_0}}{\sigma}\lto{\mu}\conf{N''}{\sigma'}$ where $N''$ agrees
+  with $N'$ on $\pn(\mu)$ and with $\projn{C_0}$ elsewhere.  The induction
+  hypothesis yields $C_0'$ with $\conf{C_0}{\sigma}\lto{\mu}\conf{C_0'}{\sigma'}$
+  and $\projn{C_0'} = N''$.  Rule \rn{C|Delay} gives
+  $\conf{\eta\seq C_0}{\sigma}\lto{\mu}\conf{\eta\seq C_0'}{\sigma'}$; take
+  $C' = \eta\seq C_0'$.  It remains to show $\projn{C'} = N'$.  For
+  $\rr\in\pn(\mu)$ we have $\rr\notin\pn(\eta)$, so
+  $\proj{C'}{\rr} = \proj{C_0'}{\rr} = N''(\rr) = N'(\rr)$.  For
+  $\rr\notin\pn(\mu)$, Lemma~\ref{lem:frame}\ref{it:frame-loc} gives
+  $N'(\rr) = N(\rr) = \proj{\eta\seq C_0}{\rr}$, and Lemma~\ref{lem:proj-inv}
+  gives $\proj{C_0'}{\rr} = \proj{C_0}{\rr}$, hence
+  $\proj{\eta\seq C_0'}{\rr} = \proj{\eta\seq C_0}{\rr} = N'(\rr)$.
+
+  \case{$C = \ifcond{\pp.e}{C_1}{C_2}$}
+  Let $Q = (\pn(C_1)\cup\pn(C_2))\setminus\{\pp\}$.  By
+  Definition~\ref{def:epp}, $N(\pp) = \sendbr{Q}{e}{\proj{C_1}{\pp}}{\proj{C_2}{\pp}}$,
+  $N(\qq) = \recvbr{\pp}{\proj{C_1}{\qq}}{\proj{C_2}{\qq}}$ for $\qq\in Q$, and
+  $N(\rr) = \nil$ otherwise.  By Lemma~\ref{lem:inversion} every process in
+  $\pn(\mu)$ has a non-terminated behaviour, so $\pn(\mu)\subseteq\{\pp\}\cup Q$.
+  We claim $\pp\in\pn(\mu)$.  Otherwise $\pn(\mu)$ contains some $\qq\in Q$,
+  whose behaviour is a receive-and-branch from $\pp$, and
+  Lemma~\ref{lem:inversion}\ref{it:inv-brecv} gives $\mu = \cast{\pp}{Q'}$ for
+  some $Q'$, contradicting $\pp\notin\pn(\mu)$.  So $\pp\in\pn(\mu)$ and, since
+  $N(\pp)$ is a send-and-branch, Lemma~\ref{lem:inversion}\ref{it:inv-cast}
+  gives $\mu = \cast{\pp}{Q}$, $\sigma' = \sigma$, $N'(\pp) = \proj{C_v}{\pp}$
+  and $N'(\qq) = \proj{C_v}{\qq}$ for $\qq\in Q$, where $\eval{e}{\sigma_\pp}{v}$;
+  by Lemma~\ref{lem:frame}\ref{it:frame-loc}, $N'(\rr) = \nil$ for
+  $\rr\notin\{\pp\}\cup Q$.  Rule \rn{C|Cast} gives
+  $\conf{C}{\sigma}\lto{\cast{\pp}{Q}}\conf{C_v}{\sigma}$; take $C' = C_v$.
+  Finally $\projn{C_v} = N'$: at $\pp$ and at every $\qq\in Q$ both are
+  $\proj{C_v}{\cdot}$ by the above, and at $\rr\notin\{\pp\}\cup Q$ we have
+  $\rr\notin\pn(C_v)$, so $\proj{C_v}{\rr} = \nil = N'(\rr)$ by
+  Lemma~\ref{lem:proj-prefix}\ref{it:pp-nil}.
+
+  \case{$C = X$}
+  Let $\rr\in\pn(\mu)$; every label involves at least one process.  By
+  Lemma~\ref{lem:inversion}, $N(\rr)\neq\nil$, so $\rr\in\pn(X)$ and
+  $N(\rr) = X$.  By Lemma~\ref{lem:inversion}\ref{it:inv-call},
+  $\mu = \tauat\rr$, $\sigma' = \sigma$ and
+  $N'(\rr) = \ldef{\rr}{X} = \proj{\body{X}}{\rr}$, and by
+  Lemma~\ref{lem:frame}\ref{it:frame-loc}, $N'(\qq) = N(\qq)$ for
+  $\qq\neq\rr$.  Rule \rn{C|Call} gives
+  $\conf{X}{\sigma}\lto{\tauat\rr}\conf{C'}{\sigma}$ with
+  $C' = \rt{(\pn(X)\setminus\{\rr\})}{X}{\body{X}}$.  By
+  Lemma~\ref{lem:proj-prefix}\ref{it:pp-rt},
+  $\proj{C'}{\rr} = \proj{\body{X}}{\rr} = N'(\rr)$, and for $\qq\neq\rr$
+  Lemma~\ref{lem:proj-inv} gives $\proj{C'}{\qq} = \proj{C}{\qq} = N(\qq) = N'(\qq)$.
+  Hence $N' = \projn{C'}$.
+
+  \case{$C = \rt{P}{X}{C_0}$}
+  By Definition~\ref{def:epp}, $N(\rr) = X$ for $\rr\in P$ and
+  $N(\rr) = \proj{C_0}{\rr}$ otherwise.  We distinguish whether the step
+  involves a process that has not entered the call.
+
+  \subcase{$P\cap\pn(\mu)\neq\emptyset$}
+  Let $\rr\in P\cap\pn(\mu)$.  Since $N(\rr) = X$,
+  Lemma~\ref{lem:inversion}\ref{it:inv-call} gives $\mu = \tauat\rr$,
+  $\sigma' = \sigma$ and $N'(\rr) = \proj{\body{X}}{\rr}$, and by
+  Lemma~\ref{lem:frame}\ref{it:frame-loc}, $N'(\qq) = N(\qq)$ for
+  $\qq\neq\rr$.  Rule \rn{C|Enter} gives
+  $\conf{C}{\sigma}\lto{\tauat\rr}\conf{C'}{\sigma}$ with
+  $C' = \rt{(P\setminus\{\rr\})}{X}{C_0}$.  By
+  Lemma~\ref{lem:proj-prefix}\ref{it:pp-rt} and the well-formedness of $C$,
+  $\proj{C'}{\rr} = \proj{C_0}{\rr} = \proj{\body{X}}{\rr} = N'(\rr)$, and
+  for $\qq\neq\rr$ Lemma~\ref{lem:proj-inv} gives
+  $\proj{C'}{\qq} = \proj{C}{\qq} = N(\qq) = N'(\qq)$.  Hence
+  $N' = \projn{C'}$.
+
+  \subcase{$P\cap\pn(\mu) = \emptyset$}
+  Then $\projn{C_0}$ agrees with $N$ on $\pn(\mu)$.  By
+  Lemma~\ref{lem:frame}\ref{it:frame-frame},
+  $\conf{\projn{C_0}}{\sigma}\lto{\mu}\conf{N''}{\sigma'}$ where $N''$
+  agrees with $N'$ on $\pn(\mu)$ and with $\projn{C_0}$ elsewhere.  The
+  induction hypothesis yields $C_0'$ with
+  $\conf{C_0}{\sigma}\lto{\mu}\conf{C_0'}{\sigma'}$ and $\projn{C_0'} = N''$.
+  Rule \rn{C|Inside} gives
+  $\conf{C}{\sigma}\lto{\mu}\conf{\rt{P}{X}{C_0'}}{\sigma'}$; take
+  $C' = \rt{P}{X}{C_0'}$.  For $\rr\in\pn(\mu)$ we have $\rr\notin P$, so
+  $\proj{C'}{\rr} = \proj{C_0'}{\rr} = N''(\rr) = N'(\rr)$.  For
+  $\rr\notin\pn(\mu)$, Lemma~\ref{lem:proj-inv} and
+  Lemma~\ref{lem:frame}\ref{it:frame-loc} give
+  $\proj{C'}{\rr} = \proj{C}{\rr} = N(\rr) = N'(\rr)$.  Hence
+  $N' = \projn{C'}$.
+\end{proof}
+
+\subsection{Consequences}
+
+Together, Theorems~\ref{thm:completeness} and~\ref{thm:soundness} and
+Lemma~\ref{lem:wf-pres} say that projection is a functional bisimulation on
+well-formed configurations.
+
+\begin{corollary}[Bisimulation]\label{cor:bisim}
+  Let $\Bis$ be the relation
+  \[
+    \Bis = \{\,(\conf{C}{\sigma},\, \conf{\projn{C}}{\sigma}) \mid C \text{ a well-formed choreography and } \sigma \text{ a store}\,\}.
+  \]
+  Then $\Bis$ is a strong labelled bisimulation between the transition
+  systems of Definitions~\ref{def:chor-sem} and~\ref{def:net-sem}, the latter
+  taken with respect to $\projn{\Defs}$:
+  \begin{enumerate}[label=(\roman*),nosep]
+  \item if $(\conf{C}{\sigma}, \conf{N}{\sigma})\in\Bis$ and
+    $\conf{C}{\sigma}\lto{\mu}\conf{C'}{\sigma'}$, then
+    $\conf{N}{\sigma}\lto{\mu}\conf{N'}{\sigma'}$ for some $N'$ with
+    $(\conf{C'}{\sigma'}, \conf{N'}{\sigma'})\in\Bis$;
+  \item if $(\conf{C}{\sigma}, \conf{N}{\sigma})\in\Bis$ and
+    $\conf{N}{\sigma}\lto{\mu}\conf{N'}{\sigma'}$, then
+    $\conf{C}{\sigma}\lto{\mu}\conf{C'}{\sigma'}$ for some $C'$ with
+    $(\conf{C'}{\sigma'}, \conf{N'}{\sigma'})\in\Bis$.
+  \end{enumerate}
+\end{corollary}
+\begin{proof}
+  (i) is Theorem~\ref{thm:completeness} with $N' = \projn{C'}$, and (ii) is
+  Theorem~\ref{thm:soundness}.  In both cases $C'$ is well-formed by
+  Lemma~\ref{lem:wf-pres}.
+\end{proof}
+
+Unlike the corresponding result for CC, the network side of the bisimulation
+is the projection itself and not a network related to it by pruning: since
+every participant of a conditional learns the outcome in the very step that
+resolves it, the projection never contains code for a branch that has
+already been ruled out.  Procedure calls are matched step for step as well,
+rather than up to the unfolding of calls, because entering a call is a
+labelled step of both systems.  The only hypothesis is well-formedness, which
+every source choreography satisfies.
+
+\begin{lemma}[Progress]\label{lem:progress}
+  If $\pn(C)\neq\emptyset$ then $\conf{C}{\sigma}\lto{\mu}\conf{C'}{\sigma'}$
+  for some $\mu$, $C'$ and $\sigma'$.
+\end{lemma}
+\begin{proof}
+  By cases on $C$, using Assumption~\ref{ass:eval}.  The case $C = \nil$ is
+  excluded since $\pn(\nil) = \emptyset$.  If $C = \pp.x := e\seq C_0$
+  or $C = \pp.e\to\qq.x\seq C_0$, then $e$ evaluates to some $v$ in
+  $\sigma_\pp$ and \rn{C|Local}, respectively \rn{C|Com}, applies.  If
+  $C = \ifcond{\pp.e}{C_1}{C_2}$, then $e$ evaluates to a boolean $v$ in
+  $\sigma_\pp$ and \rn{C|Cast} applies.  If $C = X$, then
+  $\pn(X) = \pn(C)\neq\emptyset$ and \rn{C|Call} applies for any
+  $\pp\in\pn(X)$.  If $C = \rt{P}{X}{C_0}$, then $P\neq\emptyset$ and
+  \rn{C|Enter} applies for any $\pp\in P$.
+\end{proof}
+
+\begin{corollary}[Deadlock-freedom by construction]\label{cor:df}
+  For every well-formed choreography $C$ and store $\sigma$, the
+  configuration $\conf{\projn{C}}{\sigma}$ has no transition if and only if
+  $\projn{C}$ is terminated, if and only if $\pn(C) = \emptyset$.
+  Consequently, every network configuration reachable from the projection of
+  a well-formed choreography, and in particular of a source choreography,
+  either has a transition or is terminated.
+\end{corollary}
+\begin{proof}
+  By Lemma~\ref{lem:proj-prefix}\ref{it:pp-nil}, $\projn{C}$ is terminated
+  if and only if $\pn(C) = \emptyset$.  If $\projn{C}$ is terminated then, by
+  Lemma~\ref{lem:inversion}, it has no transition.  Otherwise
+  $\pn(C)\neq\emptyset$, so by Lemma~\ref{lem:progress} $\conf{C}{\sigma}$
+  has a transition, and by Theorem~\ref{thm:completeness} so does
+  $\conf{\projn{C}}{\sigma}$.  This establishes the two equivalences.  For
+  the last claim, by Corollary~\ref{cor:bisim} every configuration reachable
+  from $\conf{\projn{C}}{\sigma}$ is of the form $\conf{\projn{C'}}{\sigma'}$
+  for some well-formed choreography $C'$, to which the equivalences apply.
+\end{proof}
+
+\begin{remark}[Procedures without participants]\label{rem:empty}
+  The condition $\pn(C) = \emptyset$ does not imply $C = \nil$.  A procedure
+  whose body, and the bodies of all procedures reachable from it, contain no
+  actions and no conditionals, such as $X = X$, has no participants.  A call
+  to it has no transitions and projects to $\nil$ at every process; it
+  describes a computation in which no process ever does anything.  If every
+  procedure has at least one participant, then $\pn(C) = \emptyset$ if and
+  only if $C = \nil$, and Corollary~\ref{cor:df} takes the same form as for
+  the language without procedures.
+\end{remark}
+
+\end{document}
